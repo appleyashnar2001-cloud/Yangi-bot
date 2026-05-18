@@ -4,8 +4,6 @@ import logging
 import random
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -18,7 +16,8 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 HEAD_ADMIN_ID = int(os.getenv("HEAD_ADMIN_ID", "7180864511"))
 
-bot = Bot(token=TOKEN, default_properties=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# Bot obyektini parse_mode bilan to'g'ri e'lon qilish (Xatolik tuzatildi)
+bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 
 # ---- MA'LUMOTLARNI VAQTINChA XOTIRADA SAQLASH TIZIMI (LOCAL DB) ----
@@ -76,7 +75,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     
-    # Bosh adminni har doim tekshirish va xotiraga kiritish
     if user_id == HEAD_ADMIN_ID:
         USERS_DB[user_id] = {"role": "head_admin", "full_name": "BOSH ADMIN"}
 
@@ -229,7 +227,7 @@ async def teacher_add_student_finish(message: types.Message, state: FSMContext):
     }
     
     await message.answer(
-        f"✅ <b>O'quvchi qo'shildi!</b>\n\n🧑‍🎓 Ismi: {data['student_name']}\n"
+        f"✅ <b>O'quvchi qo'shildi!</b>\n\n🧑‍🎓 Ismi: <b>{data['student_name']}</b>\n"
         f"🔑 Ota-ona uchun maxsus kod: <b>{code}</b>\n\n<i>Kod orqali ota-ona botga kirishi mumkin.</i>"
     )
     await state.clear()
@@ -287,8 +285,13 @@ async def lesson_group_selected(callback: types.CallbackQuery, state: FSMContext
 async def lesson_topic_received(message: types.Message, state: FSMContext):
     topic = message.text.strip()
     data = await state.get_data()
-    g_id = data['active_group_id']
     
+    # Guruh ID mavjudligini tekshirish (Ota-ona kodi bilan adashmaslik uchun)
+    if 'active_group_id' not in data:
+        await state.clear()
+        return
+        
+    g_id = data['active_group_id']
     students = [{"id": s_id, "name": s['name'], "parent_id": s['parent_id']} for s_id, s in STUDENTS_DB.items() if s['group_id'] == g_id]
     if not students:
         await message.answer("Bu guruhda o'quvchilar yo'q!")
@@ -327,7 +330,6 @@ async def process_student_attendance(callback: types.CallbackQuery, state: FSMCo
     
     report += f"• {current_student['name']}: {status_text}\n"
     
-    # Xotiradagi davomat statistikasini yangilash
     st_obj = STUDENTS_DB.get(current_student['id'])
     if st_obj:
         st_obj['total'] += 1
@@ -401,7 +403,6 @@ async def process_student_comprehension(callback: types.CallbackQuery, state: FS
         g_name = data['end_group_name']
         topic = data['end_topic']
         
-        # Soat va mavzuni yangilash
         if g_id in GROUPS_DB:
             GROUPS_DB[g_id]['total_hours'] += 2
             if topic not in GROUPS_DB[g_id]['topics_list']:
@@ -428,9 +429,9 @@ async def process_student_comprehension(callback: types.CallbackQuery, state: FS
 @dp.message(F.text == "👨‍👩‍👦 Ota-ona sifatida kirish")
 async def parent_login_start(message: types.Message, state: FSMContext):
     await message.answer("🔑 O'qituvchi bergan maxsus <b>3 xonali kirish kodini</b> kiriting:")
-    await state.set_state(BotStates.lesson_topic) # Vaqtincha bitta holatdan foydalanamiz
+    await state.set_state(BotStates.add_student_group) # Ota-ona uchun alohida fsm bandligi
 
-@dp.message(BotStates.lesson_topic)
+@dp.message(BotStates.add_student_group)
 async def parent_login_verify(message: types.Message, state: FSMContext):
     code = message.text.strip()
     found_st = None
@@ -463,9 +464,9 @@ async def parent_send_msg_start(message: types.Message, state: FSMContext):
         await message.answer("Siz hali o'quvchi kodini kiritmagansiz!")
         return
     await message.answer(f"Ustozga farzandingiz <b>{student['name']}</b> haqida xabaringizni yozing:")
-    await state.set_state(BotStates.add_admin_id) # Holatni vaqtincha bog'lash
+    await state.set_state(BotStates.add_student_phone)
 
-@dp.message(BotStates.add_admin_id)
+@dp.message(BotStates.add_student_phone)
 async def parent_send_msg_finish(message: types.Message, state: FSMContext):
     text = message.text.strip()
     student = next((s for s in STUDENTS_DB.values() if s['parent_id'] == message.from_user.id), None)
